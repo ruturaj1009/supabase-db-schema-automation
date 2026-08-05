@@ -1,5 +1,6 @@
 -- file:admin_20260806_01.sql
 -- date:20260806
+-- last-checked:20260806
 
 CREATE TABLE IF NOT EXISTS admin.org_info (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
