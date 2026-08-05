@@ -1,6 +1,5 @@
 -- file:admin_20260806_01.sql
 -- date:20260806
--- last-modified:20260806
 
 -- Create admin schema if it does not exist
 CREATE SCHEMA IF NOT EXISTS admin;
