@@ -11,7 +11,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Allow the workflow to push the updated registry back to the repo
     permissions:
       contents: write
 
@@ -21,12 +20,7 @@ jobs:
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Setup Supabase CLI
-      uses: supabase/setup-cli@v1
-      with:
-        version: latest
-
-    # ── Checksum snapshot before deployment ──────────────────────────────
+    # ── Checksum snapshot before deployment ────────────────────────────
     - name: Generate phase_1 checksums
       run: |
         echo "=== Phase 1 SQL File Checksums ===" | tee phase_1_checksums.txt
@@ -48,20 +42,24 @@ jobs:
         path: phase_1_checksums.txt
         retention-days: 90
 
-    # ── Supabase deployment ───────────────────────────────────────────────
-    - name: Link Supabase project
-      run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
-      env:
-        SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    # ── Supabase deployment via psql ────────────────────────────────────
+    # SUPABASE_DB_URL format (get from Supabase → Settings → Database → URI):
+    # postgresql://postgres.<project-ref>:<password>@<host>:5432/postgres
+    - name: Install PostgreSQL client
+      run: sudo apt-get install -y postgresql-client
 
     - name: Run phase_1 SQL deployment
       id: db_push
-      run: supabase db push --migrations-dir supabase/phase_1
-      env:
-        SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      run: |
+        echo "Applying phase_1 SQL files in sequence..."
+        find supabase/phase_1 -name "*.sql" | sort | while read f; do
+          echo "  --> Applying: $f"
+          psql "${{ secrets.SUPABASE_DB_URL }}" -f "$f" -v ON_ERROR_STOP=1
+          echo "  --> Done: $f"
+        done
+        echo "All phase_1 files applied successfully."
 
-    # ── Registry update ───────────────────────────────────────────────────
+    # ── Registry update ─────────────────────────────────────────────────
     - name: Update phase_1 registry
       if: always()
       run: |
@@ -85,7 +83,7 @@ jobs:
         git diff --cached --quiet || git commit -m "ci: update phase_1 registry [run ${{ github.run_number }}]"
         git push origin master
 
-    # ── Summary ───────────────────────────────────────────────────────────
+    # ── Summary ─────────────────────────────────────────────────────────
     - name: Deployment summary
       run: |
         echo "=== Deployment Complete ==="
@@ -98,7 +96,7 @@ jobs:
         echo "Current registry stack:"
         grep -E '^\s+(sequence|name|status):' supabase/phase_1_registry.yml | sed 's/^/  /'
         echo ""
-        echo "Migration files in phase_1:"
+        echo "SQL files in phase_1:"
         find supabase/phase_1 -name "*.sql" | sort | while read f; do
           echo "  - $f"
         done

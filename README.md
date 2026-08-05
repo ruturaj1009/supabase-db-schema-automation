@@ -5,10 +5,11 @@ Automated database schema deployment to Supabase via GitHub Actions.
 ## How it works
 
 Every time a pull request touching `supabase/phase_1/` is merged to `master`, the pipeline:
-1. **Validates** that every `.sql` file has a correct header (PR check — blocks merge on failure)
-2. **Checksums** all files and uploads an artifact for audit
-3. **Deploys** via `supabase db push` to your linked Supabase project
-4. **Updates** the `phase_1_registry.yml` with the deployment sequence and commits it back
+1. **Validates headers** — checks `-- file:` and `-- date:` format on every `.sql` file (PR check — blocks merge on failure)
+2. **Validates SQL syntax** — runs each file inside a rolled-back transaction against the real DB, catching syntax and semantic errors before they hit production (PR check — blocks merge on failure)
+3. **Checksums** all files and uploads an artifact for audit
+4. **Deploys** via `psql` to your Supabase database
+5. **Updates** the `phase_1_registry.yml` with the deployment sequence and commits it back
 
 ## Project structure
 
@@ -17,10 +18,11 @@ supabase-db-schema-automation/
 ├── .github/
 │   └── workflows/
 │       ├── deploy.yml                  # CI/CD — deploys on push to master
-│       └── validate_sql_headers.yml    # PR check — validates file headers
+│       └── validate_sql_headers.yml    # PR checks — header format + SQL syntax
 ├── scripts/
 │   ├── update_registry.sh             # Auto-updates phase_1_registry.yml
-│   └── validate_sql_headers.sh        # Validates SQL file header format
+│   ├── validate_sql_headers.sh        # Checks -- file: and -- date: headers
+│   └── validate_sql_syntax.sh         # Dry-run SQL syntax check via rollback
 ├── supabase/
 │   ├── config.toml                    # Supabase CLI config
 │   ├── phase_1_registry.yml           # Deployment sequence log (auto-managed)
@@ -63,11 +65,13 @@ Go to your repo → **Settings → Secrets and variables → Actions** and add:
 
 ### 2. (Recommended) Protect the master branch
 
-Go to **Settings → Branches → Add rule** for `master` and enable:
+Go to **Settings → Branches → Add branch protection rule** for `master` and enable:
 - ✅ Require status checks to pass before merging
-- ✅ Select `validate-headers` as a required check
+- ✅ Select `Validate SQL Headers` as a required check
+- ✅ Select `Validate SQL Syntax` as a required check
+- ✅ Require a pull request before merging (recommended)
 
-This ensures no SQL file with an invalid header can ever reach `master`.
+Both checks must pass before any PR can be merged.
 
 ### 3. Add a new SQL file
 
