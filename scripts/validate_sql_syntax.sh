@@ -9,7 +9,9 @@
 #   - Invalid data types
 #   - Malformed DDL/DML statements
 #
-# Requires: SUPABASE_DB_URL env var (postgresql://... connection string)
+# Requires: SUPABASE_DB_URL env var — use the CONNECTION POOLER URL from
+#           Supabase → Settings → Database → Connection Pooler → Session mode
+#           (port 6543). Do NOT use the direct DB URL (port 5432, IPv6 only).
 # Exits 1 if any file fails — blocks PR merge.
 
 set -euo pipefail

@@ -43,8 +43,9 @@ jobs:
         retention-days: 90
 
     # ── Supabase deployment via psql ────────────────────────────────────
-    # SUPABASE_DB_URL format (get from Supabase → Settings → Database → URI):
-    # postgresql://postgres.<project-ref>:<password>@<host>:5432/postgres
+    # Use the CONNECTION POOLER URL from Supabase → Settings → Database
+    # → Connection Pooler → Session mode (port 6543) — NOT the direct URL.
+    # Direct URL (port 5432) uses IPv6 which GitHub Actions runners block.
     - name: Install PostgreSQL client
       run: sudo apt-get install -y postgresql-client
 
@@ -58,6 +59,9 @@ jobs:
           echo "  --> Done: $f"
         done
         echo "All phase_1 files applied successfully."
+      env:
+        PGSSLMODE: require
+        PGCONNECT_TIMEOUT: 30
 
     # ── Registry update ─────────────────────────────────────────────────
     - name: Update phase_1 registry
