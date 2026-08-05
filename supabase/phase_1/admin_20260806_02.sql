@@ -2,7 +2,7 @@
 -- date:20260806
 
 -- Create admin schema if it does not exist
-CREATE SCHEMA IF NOT EXISTS admin;
+CREATE SCHEMA IF NOT EXISTS admin; 
 
 -- Organisation details table
 -- Stores organisation profile information and audit timestamps
