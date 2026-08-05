@@ -1,9 +1,10 @@
 name: Validate Phase 1 SQL Files
 
 # Runs on every PR that touches supabase/phase_1/*.sql
-# Two independent checks — both must pass before merge is allowed:
-#   1. validate-headers : checks -- file: and -- date: header format
-#   2. validate-sql     : checks SQL syntax using a live dry-run transaction
+# Three checks — all must pass before merge is allowed:
+#   1. validate-immutability : blocks modification of already-deployed files
+#   2. validate-headers      : checks -- file: and -- date: header format
+#   3. validate-sql          : SQL syntax dry-run via transaction rollback
 
 on:
   pull_request:
@@ -13,11 +14,33 @@ on:
     - 'supabase/phase_1/**'
 
 jobs:
-  # ── Job 1: Header format check ─────────────────────────────────────────
+  # ── Job 1: Immutability check ──────────────────────────────────────────
+  # Must run FIRST — no point validating headers/syntax on a file that
+  # should not be changed at all.
+  validate-immutability:
+    name: Validate File Immutability
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # need full history to diff against base branch
+
+    - name: Check no deployed files were modified
+      run: |
+        chmod +x scripts/validate_immutability.sh
+        ./scripts/validate_immutability.sh
+      env:
+        GITHUB_BASE_REF: ${{ github.base_ref }}
+
+  # ── Job 2: Header format check ─────────────────────────────────────────
   validate-headers:
     name: Validate SQL Headers
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: validate-immutability # only check new/undeployed files
 
     steps:
     - name: Checkout repository
@@ -28,13 +51,12 @@ jobs:
         chmod +x scripts/validate_sql_headers.sh
         ./scripts/validate_sql_headers.sh
 
-  # ── Job 2: SQL syntax check ─────────────────────────────────────────────
+  # ── Job 3: SQL syntax check ────────────────────────────────────────────
   validate-sql:
     name: Validate SQL Syntax
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only runs if headers pass — no point checking syntax on a badly labelled file
-    needs: validate-headers
+    needs: validate-headers # only check syntax if headers are correct
 
     steps:
     - name: Checkout repository

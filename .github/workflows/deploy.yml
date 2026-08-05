@@ -50,13 +50,23 @@ jobs:
     - name: Run phase_1 SQL deployment
       id: db_push
       run: |
+        REGISTRY="supabase/phase_1_registry.yml"
         echo "Applying phase_1 SQL files in sequence..."
+        echo "(files already in registry will be skipped — immutability guard)"
+        echo ""
         find supabase/phase_1 -name "*.sql" | sort | while read f; do
+          filename=$(basename "$f")
+          # Second line of defence: skip any file already recorded in registry
+          if [ -f "$REGISTRY" ] && grep -q "name: \"${filename}\"" "$REGISTRY" 2>/dev/null; then
+            echo "  [skip] $filename — already deployed (in registry)"
+            continue
+          fi
           echo "  --> Applying: $f"
           psql "${{ secrets.SUPABASE_DB_URL }}" -f "$f" -v ON_ERROR_STOP=1
           echo "  --> Done: $f"
         done
-        echo "All phase_1 files applied successfully."
+        echo ""
+        echo "All phase_1 files processed."
       env:
         PGSSLMODE: require
         PGCONNECT_TIMEOUT: 30
