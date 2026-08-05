@@ -1,4 +1,4 @@
--- file:admin_20260806_01.sql
+-- file:admin_20260806_02.sql
 -- date:20260806
 
 -- Create admin schema if it does not exist
