@@ -21,7 +21,7 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
 
-    # ── Checksum snapshot before deployment ────────────────────────────
+    # ── Checksum snapshot before deployment ──────────────────────────
     - name: Generate phase_1 checksums
       run: |
         echo "=== Phase 1 SQL File Checksums ===" | tee phase_1_checksums.txt
@@ -43,10 +43,7 @@ jobs:
         path: phase_1_checksums.txt
         retention-days: 90
 
-    # ── Supabase deployment via psql ────────────────────────────────────
-    # Use the CONNECTION POOLER URL from Supabase → Settings → Database
-    # → Connection Pooler → Session mode (port 6543) — NOT the direct URL.
-    # Direct URL (port 5432) uses IPv6 which GitHub Actions runners block.
+    # ── Supabase deployment via psql ──────────────────────────────────
     - name: Install PostgreSQL client
       run: sudo apt-get install -y postgresql-client
 
@@ -64,79 +61,121 @@ jobs:
         PGSSLMODE: require
         PGCONNECT_TIMEOUT: 30
 
-    # ── Registry update ─────────────────────────────────────────────────
+    # ── Registry update ───────────────────────────────────────────────
     - name: Update phase_1 registry
       if: always()
+      shell: bash
       run: |
+        set -x  # print every command before executing — shows exact failure line
+
         REGISTRY="supabase/phase_1_registry.yml"
         PHASE_DIR="supabase/phase_1"
         DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+        echo "--- DEBUG: environment ---"
+        echo "  bash version : $BASH_VERSION"
+        echo "  pwd          : $(pwd)"
+        echo "  REGISTRY     : $REGISTRY"
+        echo "  PHASE_DIR    : $PHASE_DIR"
+        echo "  db_push.outcome : ${{ steps.db_push.outcome }}"
+
         STATUS="applied"
         if [ "${{ steps.db_push.outcome }}" != "success" ]; then
           STATUS="failed"
         fi
+        echo "  STATUS       : $STATUS"
 
-        # Create registry file if it does not exist
-        if [ ! -f "$REGISTRY" ]; then
-          echo "Registry not found — creating initial registry at $REGISTRY"
+        echo "--- DEBUG: registry file check ---"
+        if [ -f "$REGISTRY" ]; then
+          echo "  Registry exists. Contents:"
+          cat "$REGISTRY"
+        else
+          echo "  Registry NOT found — creating it now"
           mkdir -p "$(dirname "$REGISTRY")"
           printf '# Phase 1 Registry\n# Auto-updated by GitHub Actions.\n\nphase_1_files: []\n' > "$REGISTRY"
+          echo "  Created registry. Contents:"
+          cat "$REGISTRY"
         fi
 
-        echo "=== Updating phase_1 registry ==="
+        echo "--- DEBUG: listing SQL files ---"
+        find "$PHASE_DIR" -name "*.sql" | sort || echo "  (no files found)"
 
+        echo "--- DEBUG: processing files ---"
         for filepath in $(find "$PHASE_DIR" -name "*.sql" | sort); do
           filename=$(basename "$filepath")
+          echo "  Processing: $filename"
 
-          # Skip if already registered (guard: file may be empty)
-          if grep -q "name: \"${filename}\"" "$REGISTRY" 2>/dev/null; then
+          echo "  Checking if already registered..."
+          if grep -q "name: \"${filename}\"" "$REGISTRY"; then
             echo "  [skip] $filename — already registered"
             continue
           fi
+          echo "  Not yet registered — will add"
 
-          # Sequence number — guard grep -c returning 1 on no match
-          existing=$(grep -c '^\s*- sequence:' "$REGISTRY" 2>/dev/null || true)
+          echo "  Counting existing entries..."
+          existing=0
+          existing=$(grep -c '^\s*- sequence:' "$REGISTRY") || existing=0
           existing=${existing:-0}
+          echo "  existing count: $existing"
           seq=$((existing + 1))
+          echo "  next sequence : $seq"
 
-          # Checksum
+          echo "  Computing checksum..."
           checksum=$(sha256sum "$filepath" | awk '{print $1}')
+          echo "  checksum: $checksum"
 
-          echo "  [add]  seq=$seq  $filename"
-
-          # Replace empty placeholder on first entry
-          if grep -q 'phase_1_files: \[\]' "$REGISTRY" 2>/dev/null; then
+          if grep -q 'phase_1_files: \[\]' "$REGISTRY"; then
+            echo "  Replacing empty placeholder..."
             sed -i 's/phase_1_files: \[\]/phase_1_files:/' "$REGISTRY"
           fi
 
+          echo "  Appending entry to registry..."
           printf '\n  - sequence: %s\n    name: "%s"\n    checksum: "sha256:%s"\n    deployed_at: "%s"\n    commit_sha: "%s"\n    actor: "%s"\n    run_id: "%s"\n    status: "%s"\n' \
             "$seq" "$filename" "$checksum" "$DEPLOYED_AT" \
             "${{ github.sha }}" "${{ github.actor }}" "${{ github.run_id }}" "$STATUS" \
             >> "$REGISTRY"
+
+          echo "  [add] seq=$seq $filename — done"
         done
 
-        echo ""
-        echo "=== Registry contents ==="
+        echo "--- DEBUG: final registry contents ---"
         cat "$REGISTRY"
+        echo "--- DEBUG: registry update complete ---"
 
+    # ── Commit registry ───────────────────────────────────────────────
     - name: Commit updated registry
       if: always()
       run: |
+        echo "--- DEBUG: git status before add ---"
+        git status
+
         git config user.name  "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add supabase/phase_1_registry.yml
+
+        echo "--- DEBUG: git diff after add ---"
+        git diff --cached --stat
+
         if git diff --cached --quiet; then
           echo "No registry changes to commit."
           exit 0
         fi
-        git commit -m "ci: update phase_1 registry [run ${{ github.run_number }}]"
-        # Fetch and rebase before push to avoid rejection when remote advanced
-        git fetch origin master
-        git rebase origin/master || true
-        git push origin master
 
-    # ── Summary ─────────────────────────────────────────────────────────
+        git commit -m "ci: update phase_1 registry [run ${{ github.run_number }}]"
+
+        echo "--- DEBUG: fetching origin/master ---"
+        git fetch origin master
+
+        echo "--- DEBUG: rebasing onto origin/master ---"
+        git rebase origin/master
+
+        echo "--- DEBUG: pushing to origin/master ---"
+        git push origin master
+        echo "--- DEBUG: push complete ---"
+
+    # ── Summary ───────────────────────────────────────────────────────
     - name: Deployment summary
+      if: always()
       run: |
         echo "=== Deployment Complete ==="
         echo "Run ID      : ${{ github.run_id }}"
@@ -145,10 +184,10 @@ jobs:
         echo "Triggered by: ${{ github.actor }}"
         echo "Timestamp   : $(date -u)"
         echo ""
-        echo "Current registry stack:"
-        grep -E '^\s+(sequence|name|status):' supabase/phase_1_registry.yml | sed 's/^/  /'
-        echo ""
         echo "SQL files in phase_1:"
         find supabase/phase_1 -name "*.sql" | sort | while read f; do
           echo "  - $f"
         done
+        echo ""
+        echo "Registry:"
+        cat supabase/phase_1_registry.yml || echo "(registry not found)"
