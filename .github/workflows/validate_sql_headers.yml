@@ -1,9 +1,9 @@
-name: Validate Phase 1 SQL Headers
+name: Validate Phase 1 SQL Files
 
 # Runs on every PR that touches supabase/phase_1/*.sql
-# Blocks merge if any .sql file is missing the required header format:
-#   Line 1: -- file:<filename>
-#   Line 2: -- date:<YYYYMMDD>
+# Two independent checks — both must pass before merge is allowed:
+#   1. validate-headers : checks -- file: and -- date: header format
+#   2. validate-sql     : checks SQL syntax using a live dry-run transaction
 
 on:
   pull_request:
@@ -13,7 +13,9 @@ on:
     - 'supabase/phase_1/**'
 
 jobs:
+  # ── Job 1: Header format check ─────────────────────────────────────────
   validate-headers:
+    name: Validate SQL Headers
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -25,3 +27,25 @@ jobs:
       run: |
         chmod +x scripts/validate_sql_headers.sh
         ./scripts/validate_sql_headers.sh
+
+  # ── Job 2: SQL syntax check ─────────────────────────────────────────────
+  validate-sql:
+    name: Validate SQL Syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only runs if headers pass — no point checking syntax on a badly labelled file
+    needs: validate-headers
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install PostgreSQL client
+      run: sudo apt-get install -y postgresql-client
+
+    - name: Validate SQL syntax (dry-run via transaction rollback)
+      run: |
+        chmod +x scripts/validate_sql_syntax.sh
+        ./scripts/validate_sql_syntax.sh
+      env:
+        SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
