@@ -4,7 +4,6 @@
 #
 # Fields per entry:
 #   sequence    : order in which the file was applied (1-based)
-#   version     : timestamp prefix from the filename
 #   name        : full filename
 #   checksum    : SHA-256 hash of the file at time of deployment
 #   deployed_at : UTC timestamp of deployment

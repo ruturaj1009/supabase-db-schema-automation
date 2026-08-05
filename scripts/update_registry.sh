@@ -6,7 +6,8 @@
 # Usage:
 #   ./scripts/update_registry.sh <commit_sha> <actor> <run_id> <status>
 
-set -euo pipefail
+set -uo pipefail
+# Note: -e is intentionally omitted so grep non-matches don't abort the script
 
 REGISTRY="supabase/phase_1_registry.yml"
 PHASE_DIR="supabase/phase_1"
@@ -16,28 +17,27 @@ RUN_ID="${3:-unknown}"
 STATUS="${4:-applied}"
 DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-# Build list of already-registered versions from the registry
-registered_versions() {
-  grep '^\s*version:' "$REGISTRY" | awk '{print $2}' | tr -d '"'
+# Return list of already-registered filenames from the registry
+registered_names() {
+  grep '^\s*name:' "$REGISTRY" | awk '{print $2}' | tr -d '"'
 }
 
 # Count existing entries to determine next sequence number
 next_sequence() {
   local count
-  count=$(grep -c '^\s*- sequence:' "$REGISTRY" 2>/dev/null || echo 0)
+  count=$(grep -c '^\s*- sequence:' "$REGISTRY" || true)
   echo $((count + 1))
 }
 
 echo "=== Updating phase_1 registry ==="
+echo ""
 
-# Sort SQL files by name (timestamp order)
+# Sort SQL files by name
 while IFS= read -r filepath; do
   filename=$(basename "$filepath")
-  # Extract version = leading digits (timestamp prefix)
-  version=$(echo "$filename" | grep -oP '^\d+')
 
-  # Skip if already registered
-  if registered_versions | grep -qx "$version"; then
+  # Skip if already registered (match on full filename, not version prefix)
+  if registered_names | grep -qx "\"${filename}\"" || registered_names | grep -qx "${filename}"; then
     echo "  [skip] $filename — already in registry"
     continue
   fi
@@ -56,7 +56,6 @@ while IFS= read -r filepath; do
   cat >> "$REGISTRY" <<EOF
 
   - sequence: ${seq}
-    version: "${version}"
     name: "${filename}"
     checksum: "sha256:${checksum}"
     deployed_at: "${DEPLOYED_AT}"
@@ -70,5 +69,6 @@ done < <(find "$PHASE_DIR" -name "*.sql" | sort)
 
 echo ""
 echo "Registry updated: $REGISTRY"
+echo ""
 echo "Current stack:"
 grep -E '^\s+(sequence|name|status):' "$REGISTRY" | sed 's/^/  /'
