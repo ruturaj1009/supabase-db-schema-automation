@@ -1,0 +1,104 @@
+name: Deploy Phase 1 SQL Files
+
+on:
+  push:
+    branches:
+    - master
+    paths:
+    - 'supabase/phase_1/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Allow the workflow to push the updated registry back to the repo
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Supabase CLI
+      uses: supabase/setup-cli@v1
+      with:
+        version: latest
+
+    # ── Checksum snapshot before deployment ──────────────────────────────
+    - name: Generate phase_1 checksums
+      run: |
+        echo "=== Phase 1 SQL File Checksums ===" | tee phase_1_checksums.txt
+        echo "Commit SHA  : ${{ github.sha }}"    | tee -a phase_1_checksums.txt
+        echo "Branch      : ${{ github.ref_name }}" | tee -a phase_1_checksums.txt
+        echo "Actor       : ${{ github.actor }}"  | tee -a phase_1_checksums.txt
+        echo "Timestamp   : $(date -u)"            | tee -a phase_1_checksums.txt
+        echo ""                                    | tee -a phase_1_checksums.txt
+        echo "SHA256  FILE"                        | tee -a phase_1_checksums.txt
+        echo "----------------------------------------------" | tee -a phase_1_checksums.txt
+        find supabase/phase_1 -name "*.sql" | sort | while read f; do
+          sha256sum "$f" | tee -a phase_1_checksums.txt
+        done
+
+    - name: Upload checksum artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: phase_1-checksums-${{ github.sha }}
+        path: phase_1_checksums.txt
+        retention-days: 90
+
+    # ── Supabase deployment ───────────────────────────────────────────────
+    - name: Link Supabase project
+      run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+      env:
+        SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+    - name: Run phase_1 SQL deployment
+      id: db_push
+      run: supabase db push --migrations-dir supabase/phase_1
+      env:
+        SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+    # ── Registry update ───────────────────────────────────────────────────
+    - name: Update phase_1 registry
+      if: always()
+      run: |
+        chmod +x scripts/update_registry.sh
+        STATUS="applied"
+        if [ "${{ steps.db_push.outcome }}" != "success" ]; then
+          STATUS="failed"
+        fi
+        ./scripts/update_registry.sh \
+          "${{ github.sha }}" \
+          "${{ github.actor }}" \
+          "${{ github.run_id }}" \
+          "$STATUS"
+
+    - name: Commit updated registry
+      if: always()
+      run: |
+        git config user.name  "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add supabase/phase_1_registry.yml
+        git diff --cached --quiet || git commit -m "ci: update phase_1 registry [run ${{ github.run_number }}]"
+        git push origin master
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    - name: Deployment summary
+      run: |
+        echo "=== Deployment Complete ==="
+        echo "Run ID      : ${{ github.run_id }}"
+        echo "Run number  : ${{ github.run_number }}"
+        echo "Commit SHA  : ${{ github.sha }}"
+        echo "Triggered by: ${{ github.actor }}"
+        echo "Timestamp   : $(date -u)"
+        echo ""
+        echo "Current registry stack:"
+        grep -E '^\s+(sequence|name|status):' supabase/phase_1_registry.yml | sed 's/^/  /'
+        echo ""
+        echo "Migration files in phase_1:"
+        find supabase/phase_1 -name "*.sql" | sort | while read f; do
+          echo "  - $f"
+        done

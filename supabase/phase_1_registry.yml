@@ -1,0 +1,16 @@
+# Phase 1 Registry
+# Auto-updated by GitHub Actions on each deployment.
+# DO NOT edit manually — this file is managed by the CI/CD pipeline.
+#
+# Fields per entry:
+#   sequence    : order in which the file was applied (1-based)
+#   version     : timestamp prefix from the filename
+#   name        : full filename
+#   checksum    : SHA-256 hash of the file at time of deployment
+#   deployed_at : UTC timestamp of deployment
+#   commit_sha  : git commit that triggered the deployment
+#   actor       : GitHub user who pushed the commit
+#   run_id      : GitHub Actions run ID (link to logs)
+#   status      : applied | failed | skipped
+
+phase_1_files: []

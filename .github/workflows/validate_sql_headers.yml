@@ -1,0 +1,27 @@
+name: Validate Phase 1 SQL Headers
+
+# Runs on every PR that touches supabase/phase_1/*.sql
+# Blocks merge if any .sql file is missing the required header format:
+#   Line 1: -- file:<filename>
+#   Line 2: -- date:<YYYYMMDD>
+
+on:
+  pull_request:
+    branches:
+    - master
+    paths:
+    - 'supabase/phase_1/**'
+
+jobs:
+  validate-headers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Validate SQL file headers
+      run: |
+        chmod +x scripts/validate_sql_headers.sh
+        ./scripts/validate_sql_headers.sh
