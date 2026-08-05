@@ -12,4 +12,13 @@
 #   run_id      : GitHub Actions run ID (link to logs)
 #   status      : applied | failed | skipped
 
-phase_1_files: []
+phase_1_files:
+
+  - sequence: 1
+    name: "admin_20260806_01.sql"
+    checksum: "sha256:dba0513ae0c338ed4a195cfb2eae8eb7e889acb5c06829c8b686331bde86dad3"
+    deployed_at: "2026-08-05T21:07:50Z"
+    commit_sha: "8a920811aa4c1a495261b7fdb6bbca378f933f76"
+    actor: "ruturaj1009"
+    run_id: "31047280798"
+    status: "applied"
