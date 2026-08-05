@@ -19,6 +19,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
 
     # ── Checksum snapshot before deployment ────────────────────────────
     - name: Generate phase_1 checksums
@@ -75,20 +76,27 @@ jobs:
           STATUS="failed"
         fi
 
+        # Create registry file if it does not exist
+        if [ ! -f "$REGISTRY" ]; then
+          echo "Registry not found — creating initial registry at $REGISTRY"
+          mkdir -p "$(dirname "$REGISTRY")"
+          printf '# Phase 1 Registry\n# Auto-updated by GitHub Actions.\n\nphase_1_files: []\n' > "$REGISTRY"
+        fi
+
         echo "=== Updating phase_1 registry ==="
 
         for filepath in $(find "$PHASE_DIR" -name "*.sql" | sort); do
           filename=$(basename "$filepath")
 
-          # Skip if already registered
+          # Skip if already registered (guard: file may be empty)
           if grep -q "name: \"${filename}\"" "$REGISTRY" 2>/dev/null; then
             echo "  [skip] $filename — already registered"
             continue
           fi
 
-          # Sequence number
-          existing=0
-          existing=$(grep -c '^\s*- sequence:' "$REGISTRY" 2>/dev/null) || existing=0
+          # Sequence number — guard grep -c returning 1 on no match
+          existing=$(grep -c '^\s*- sequence:' "$REGISTRY" 2>/dev/null || true)
+          existing=${existing:-0}
           seq=$((existing + 1))
 
           # Checksum
@@ -108,7 +116,7 @@ jobs:
         done
 
         echo ""
-        echo "Registry:"
+        echo "=== Registry contents ==="
         cat "$REGISTRY"
 
     - name: Commit updated registry
@@ -122,8 +130,9 @@ jobs:
           exit 0
         fi
         git commit -m "ci: update phase_1 registry [run ${{ github.run_number }}]"
-        # Pull with rebase to handle any commits pushed since workflow started
-        git pull --rebase origin master
+        # Fetch and rebase before push to avoid rejection when remote advanced
+        git fetch origin master
+        git rebase origin/master || true
         git push origin master
 
     # ── Summary ─────────────────────────────────────────────────────────
