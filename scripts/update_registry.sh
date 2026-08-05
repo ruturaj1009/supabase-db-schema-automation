@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 # update_registry.sh
-# Scans supabase/phase_1/*.sql and appends any new entries to phase_1_registry.yml
-# Called by GitHub Actions after a successful db push.
+# Scans supabase/phase_1/*.sql and appends new entries to phase_1_registry.yml
 #
 # Usage:
 #   ./scripts/update_registry.sh <commit_sha> <actor> <run_id> <status>
-
-set -uo pipefail
-# Note: -e is intentionally omitted so grep non-matches don't abort the script
 
 REGISTRY="supabase/phase_1_registry.yml"
 PHASE_DIR="supabase/phase_1"
@@ -16,59 +12,63 @@ ACTOR="${2:-unknown}"
 RUN_ID="${3:-unknown}"
 STATUS="${4:-applied}"
 DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-# Return list of already-registered filenames from the registry
-registered_names() {
-  grep '^\s*name:' "$REGISTRY" | awk '{print $2}' | tr -d '"'
-}
-
-# Count existing entries to determine next sequence number
-next_sequence() {
-  local count
-  count=$(grep -c '^\s*- sequence:' "$REGISTRY" || true)
-  echo $((count + 1))
-}
+ERRORS=0
 
 echo "=== Updating phase_1 registry ==="
 echo ""
 
-# Sort SQL files by name
-while IFS= read -r filepath; do
+for filepath in $(find "$PHASE_DIR" -name "*.sql" | sort); do
   filename=$(basename "$filepath")
 
-  # Skip if already registered (match on full filename, not version prefix)
-  if registered_names | grep -qx "\"${filename}\"" || registered_names | grep -qx "${filename}"; then
+  # Check if this filename is already in the registry
+  already_registered=0
+  if grep -q "name: \"${filename}\"" "$REGISTRY" 2>/dev/null; then
+    already_registered=1
+  fi
+
+  if [ "$already_registered" -eq 1 ]; then
     echo "  [skip] $filename — already in registry"
     continue
   fi
 
+  # Count current entries for sequence number
+  seq=1
+  existing=$(grep -c '^\s*- sequence:' "$REGISTRY" 2>/dev/null) || existing=0
+  seq=$((existing + 1))
+
+  # Compute checksum
   checksum=$(sha256sum "$filepath" | awk '{print $1}')
-  seq=$(next_sequence)
+  if [ -z "$checksum" ]; then
+    echo "  [ERROR] Could not compute checksum for $filename"
+    ERRORS=$((ERRORS + 1))
+    continue
+  fi
 
-  echo "  [add]  sequence=$seq  $filename"
+  echo "  [add]  sequence=$seq  $filename  sha256:${checksum:0:12}..."
 
-  # Replace empty placeholder on first entry
-  if grep -q 'phase_1_files: \[\]' "$REGISTRY"; then
+  # On first entry replace the empty placeholder
+  if grep -q 'phase_1_files: \[\]' "$REGISTRY" 2>/dev/null; then
     sed -i 's/phase_1_files: \[\]/phase_1_files:/' "$REGISTRY"
   fi
 
-  # Append the new entry
-  cat >> "$REGISTRY" <<EOF
+  # Append entry — use printf to avoid heredoc CRLF issues on some runners
+  printf '\n  - sequence: %s\n    name: "%s"\n    checksum: "sha256:%s"\n    deployed_at: "%s"\n    commit_sha: "%s"\n    actor: "%s"\n    run_id: "%s"\n    status: "%s"\n' \
+    "$seq" "$filename" "$checksum" "$DEPLOYED_AT" \
+    "$COMMIT_SHA" "$ACTOR" "$RUN_ID" "$STATUS" \
+    >> "$REGISTRY"
 
-  - sequence: ${seq}
-    name: "${filename}"
-    checksum: "sha256:${checksum}"
-    deployed_at: "${DEPLOYED_AT}"
-    commit_sha: "${COMMIT_SHA}"
-    actor: "${ACTOR}"
-    run_id: "${RUN_ID}"
-    status: "${STATUS}"
-EOF
-
-done < <(find "$PHASE_DIR" -name "*.sql" | sort)
+done
 
 echo ""
 echo "Registry updated: $REGISTRY"
 echo ""
 echo "Current stack:"
-grep -E '^\s+(sequence|name|status):' "$REGISTRY" | sed 's/^/  /'
+grep -E '(sequence:|name:|status:)' "$REGISTRY" | sed 's/^/  /' || true
+
+if [ "$ERRORS" -gt 0 ]; then
+  echo ""
+  echo "ERROR: $ERRORS file(s) failed to register."
+  exit 1
+fi
+
+exit 0

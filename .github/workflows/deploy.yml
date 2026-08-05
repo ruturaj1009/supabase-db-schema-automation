@@ -84,7 +84,14 @@ jobs:
         git config user.name  "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add supabase/phase_1_registry.yml
-        git diff --cached --quiet || git commit -m "ci: update phase_1 registry [run ${{ github.run_number }}]"
+        # Only proceed if there are actual changes
+        if git diff --cached --quiet; then
+          echo "No registry changes to commit."
+          exit 0
+        fi
+        git commit -m "ci: update phase_1 registry [run ${{ github.run_number }}]"
+        # Pull latest master (bot commits from prior runs) then push
+        git pull --rebase origin master
         git push origin master
 
     # ── Summary ─────────────────────────────────────────────────────────
